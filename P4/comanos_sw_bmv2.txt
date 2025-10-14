@@ -1,0 +1,83 @@
+sudo ip link add br1 type bridge
+sudo ip link set br1 up
+sudo ip addr add 10.0.1.10/24 dev br1
+sudo ip route add 10.0.2.0/24 via 10.0.1.10
+ip neighbor add 10.0.2.10 lladdr 52:54:00:2f:49:a2 nud permanent dev enp7s0
+ip neighbor add 10.0.1.10 lladdr 52:54:00:1e:2b:c8 nud permanent dev enp8s0
+
+ip neighbor add 10.0.5.10 lladdr 52:54:00:2b:7d:ae nud permanent dev ens3
+ip neighbor add 10.0.6.10 lladdr 52:54:00:e2:15:c1 nud permanent dev ens3
+
+add_with_hit(dst_addr=0x5254002b7dae,port=140)
+add_with_hit(dst_addr=0x525400e215c1,port=141)
+
+sysctl -w net.ipv6.conf.all.disable_ipv6=1
+sysctl -w net.ipv6.conf.default.disable_ipv6=1
+sysctl -w net.ipv6.conf.lo.disable_ipv6=1	
+
+ip neigh show
+
+sudo ip link add br2 type bridge
+sudo ip link set br2 up
+
+ip link set enp0s8 up
+ip link set enp0s9 up
+ip link set enp0s10 up
+ip route add default via 192.168.56.1
+
+p4c-bm2-ss --p4v 16 int.p4 -o int.json -DBMV2
+simple_switch -i 1@enp7s0 -i 2@enp8s0 -i 3@enp9s0 --device-id 0 --log-file salida int.json &
+simple_switch -i 1@enp7s0 -i 2@enp8s0 --device-id 1 int.json &
+
+
+SW1:
+ip route add 10.0.2.0/24 via 10.0.1.10
+ip neighbor add 10.0.2.10 lladdr 52:54:00:2f:49:a2 nud permanent dev enp7s0
+
+simple_switch -i 1@enp7s0 -i 2@enp8s0 --device-id 1 int.json &
+
+echo "table_add tb_activate_source activate_source 1 =>" | simple_switch_CLI
+echo "table_add tb_int_source configure_source 10.0.1.10&&&0xFFFFFFFF 10.0.2.10&&&0xFFFFFFFF 0x11FF&&&0x0000 0x22FF&&&0x0000 => 4 10 8 0xFF00 0" | simple_switch_CLI
+
+echo "table_add tb_int_transit configure_transit => 1 1500" | simple_switch_CLI
+echo "table_add tb_forward send_to_port 52:54:00:1e:2b:c8&&&0xFFFFFFFF => 1 0" | simple_switch_CLI
+echo "table_add tb_forward send_to_port 52:54:00:2f:49:a2&&&0xFFFFFFFF => 2 1" | simple_switch_CLI
+
+SW2:
+simple_switch -i 1@enp7s0 -i 2@enp8s0 --device-id 2 int.json &
+
+echo "table_add tb_activate_source activate_source 1 =>" | simple_switch_CLI
+echo "table_add tb_int_transit configure_transit => 2 1500" | simple_switch_CLI
+echo "table_add tb_forward send_to_port 52:54:00:1e:2b:c8&&&0xFFFFFFFF => 1 0" | simple_switch_CLI
+echo "table_add tb_forward send_to_port 52:54:00:2f:49:a2&&&0xFFFFFFFF => 2 1" | simple_switch_CLI
+
+SW3:
+ip route add 10.0.1.0/24 via 10.0.2.10
+ip neighbor add 10.0.1.10 lladdr 52:54:00:1e:2b:c8 nud permanent dev enp8s0
+
+simple_switch -i 1@enp7s0 -i 2@enp8s0 -i 3@enp9s0 --device-id 3 int.json &
+
+echo "table_add tb_activate_source activate_source 1 =>" | simple_switch_CLI
+echo "table_add tb_int_sink configure_sink 2 => 3" | simple_switch_CLI
+echo "mirroring_add 1 3" | simple_switch_CLI
+echo "table_add tb_int_reporting send_report => 52:54:00:1e:2b:c8  10.0.1.10  52:54:00:14:53:26  10.0.3.10 8090" | simple_switch_CLI
+
+echo "table_add tb_int_transit configure_transit => 3 1500" | simple_switch_CLI
+echo "table_add tb_forward send_to_port 52:54:00:1e:2b:c8&&&0xFFFFFFFF => 1 0" | simple_switch_CLI
+echo "table_add tb_forward send_to_port 52:54:00:2f:49:a2&&&0xFFFFFFFF => 2 1" | simple_switch_CLI
+
+01:0c:cd:01:00:15
+
+apt install --reinstall tzdata ntp
+dpkg-reconfigure tzdata
+systemctl enable serial-getty@ttyS0.service
+systemctl start serial-getty@ttyS0.service
+
+virsh list --all
+virsh net-dhcp-leases default
+virsh domifaddr mi-vm
+virsh console <nombre_de_la_vm>
+virsh net-info default
+
+
+echo "table_add ipv4_lpm ipv4_forward 192.168.200.2/32 => 52:54:00:1e:2b:c8 1" | simple_switch_CLI
